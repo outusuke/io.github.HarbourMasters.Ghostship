@@ -14,16 +14,14 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
-      - name: Pin sha256 of upstream Ghostship release
-        run: |
-          URL=$(grep -m1 'url:' io.github.HarbourMasters.Ghostship.yml | awk '{print $NF}')
-          SHA=$(curl -fsSL "$URL" | sha256sum | cut -d' ' -f1)
-          sed -i "s/sha256: .*/sha256: $SHA/" io.github.HarbourMasters.Ghostship.yml
+      - name: Resolve Ghostship sources
+        run: bash prepare.sh
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: Ghostship.flatpak
           manifest-path: io.github.HarbourMasters.Ghostship.yml
+          cache: false
       - name: Upload temporary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -47,8 +45,8 @@ jobs:
           files: Ghostship.flatpak
           generate_release_notes: true
           body: |
-            Unofficial Flatpak bundle for Ghostship (Super Mario 64 PC port).
-            You must supply your own Super Mario 64 (US) ROM.
+            Unofficial Flatpak bundle for Ghostship (Super Mario 64 PC port), built from the latest `develop`.
+            You must supply your own Super Mario 64 (US or JP) ROM in .z64 format.
 
             **First install:**
             ```bash
