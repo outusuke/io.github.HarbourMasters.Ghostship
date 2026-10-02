@@ -1,0 +1,116 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 2cd41b4..99aaaf8 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -124,7 +124,7 @@ android {
+     ndkVersion = "30.0.15729638"
+ 
+     defaultConfig {
+-        applicationId = "dev.net64.ghostship"
++        applicationId = "dev.net64.ghostship.sync"
+         minSdk = 24
+         targetSdk = 36
+         versionCode = 2
+diff --git a/android/app/src/main/java/dev/net64/ghostship/MainActivity.kt b/android/app/src/main/java/dev/net64/ghostship/MainActivity.kt
+index 610a17d..bf28c9b 100644
+--- a/android/app/src/main/java/dev/net64/ghostship/MainActivity.kt
++++ b/android/app/src/main/java/dev/net64/ghostship/MainActivity.kt
+@@ -48,6 +48,9 @@ class MainActivity : SDLActivity() {
+     private external fun isMenuOpen(): Boolean
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
++        // Before super: SDLActivity loads the game library there, and the
++        // engine reads the saves location when it first needs it.
++        SaveStore.configureNativeSaves(this)
+         super.onCreate(savedInstanceState)
+         goFullscreen()
+         addModsButton()
+diff --git a/android/app/src/main/java/dev/net64/ghostship/SaveStore.kt b/android/app/src/main/java/dev/net64/ghostship/SaveStore.kt
+index 62d50db..1a65c10 100644
+--- a/android/app/src/main/java/dev/net64/ghostship/SaveStore.kt
++++ b/android/app/src/main/java/dev/net64/ghostship/SaveStore.kt
+@@ -37,8 +37,42 @@ object SaveStore {
+                 ?: file.name
+     }
+ 
++    /** Name of the environment variable the native side reads (src/port/data/Saves.cpp). */
++    private const val SAVES_ENV = "GHOSTSHIP_SAVES_DIR"
++
++    /**
++     * Fork patch: saves live in Android/media/<package>/saves instead of
++     * Android/data/<package>/files/saves. Android/media can be reached by
++     * Syncthing (with "All files access"); Android/data cannot on Android 11+.
++     */
++    private fun syncableSavesDir(context: Context): File? =
++        context.externalMediaDirs.firstOrNull { it != null }?.let { File(it, "saves") }
++
++    private fun legacySavesDir(context: Context) = File(GameAssets.gameDir(context), "saves")
++
+     fun savesDir(context: Context): File =
+-        File(GameAssets.gameDir(context), "saves").also { it.mkdirs() }
++        (syncableSavesDir(context) ?: legacySavesDir(context)).also { it.mkdirs() }
++
++    /**
++     * Points the native engine at [savesDir] and moves saves over from the old
++     * location the first time. Must run before the game library loads, i.e.
++     * before SDLActivity.onCreate.
++     */
++    fun configureNativeSaves(context: Context) {
++        val target = syncableSavesDir(context) ?: return
++        target.mkdirs()
++
++        try {
++            val legacy = legacySavesDir(context)
++            val hasNew = target.listFiles()?.any { it.isFile } == true
++            if (!hasNew && legacy.isDirectory) {
++                legacy.listFiles()?.filter { it.isFile }?.forEach { it.copyTo(File(target, it.name), overwrite = false) }
++            }
++            android.system.Os.setenv(SAVES_ENV, target.absolutePath, true)
++        } catch (error: Exception) {
++            Log.w(TAG, "Could not redirect saves to ${target.path}", error)
++        }
++    }
+ 
+     fun list(context: Context): List<Save> =
+         (savesDir(context).listFiles() ?: emptyArray())
+diff --git a/src/port/data/Saves.cpp b/src/port/data/Saves.cpp
+index f6beb3b..a741e30 100644
+--- a/src/port/data/Saves.cpp
++++ b/src/port/data/Saves.cpp
+@@ -4,6 +4,7 @@
+ #include "port/ShipInit.hpp"
+ #include "port/data/SaveConversion.h"
+ 
++#include <cstdlib>
+ #include <fstream>
+ #include <filesystem>
+ namespace fs = std::filesystem;
+@@ -14,15 +15,26 @@ extern "C" struct SaveBuffer gSaveBuffer;
+ // comes from SDL_AndroidGetExternalStoragePath(), which calls into Java — and a
+ // global constructor runs at dlopen, before SDL's JNI is set up, so asking then
+ // aborts the process with "CallStaticObjectMethod received NULL jclass".
++//
++// Fork patch: GHOSTSHIP_SAVES_DIR, when set (the Android launcher sets it to a
++// folder under Android/media so Syncthing can reach it), replaces the default
++// <app dir>/saves location.
+ static const fs::path& SavesPath() {
+-    static const fs::path path(Ship::Context::GetPathRelativeToAppDirectory("saves", "sm64"));
++    static const fs::path path = []() -> fs::path {
++        const char* custom = std::getenv("GHOSTSHIP_SAVES_DIR");
++        if (custom != nullptr && *custom != '\0') {
++            return fs::path(custom);
++        }
++        return fs::path(Ship::Context::GetPathRelativeToAppDirectory("saves", "sm64"));
++    }();
+     return path;
+ }
+ 
+ static void Init() {
+     // Create saves directory if it doesn't exist
+     if (!fs::exists(SavesPath())) {
+-        fs::create_directory(SavesPath());
++        std::error_code ec;
++        fs::create_directories(SavesPath(), ec);
+     }
+ }
+ 
