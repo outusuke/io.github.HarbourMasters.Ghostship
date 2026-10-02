@@ -102,6 +102,14 @@ modules:
       - cmake --build build -j"$FLATPAK_BUILDER_N_JOBS"
       - install -Dm755 build/Ghostship /app/ghostship/Ghostship
       - install -Dm644 build/ghostship.o2r /app/ghostship/ghostship.o2r
+      # libtcc (TinyCC, used for mod scripting) is built as a shared lib in the build tree and the
+      # binary's RUNPATH points there. Upstream only installs it on macOS, so ship every shared lib
+      # that resolves into the build tree (libtcc.so, plus anything similar) into /app/lib.
+      - ldd build/Ghostship | while read -r name arrow path rest; do case "$path" in /run/build/*) cp -L "$path" "/app/lib/$name";; esac; done
+      - test -e /app/lib/libtcc.so
+      # TinyCC headers + libtcc1 + crt files, staged by the build next to the binary.
+      - test -d build/.tcc/include
+      - cp -r build/.tcc /app/ghostship/.tcc
       - install -Dm644 config.yml /app/ghostship/config.yml
       - install -d /app/ghostship/assets && cp -r assets/. /app/ghostship/assets/
       - install -Dm644 gamecontrollerdb.txt /app/ghostship/gamecontrollerdb.txt
@@ -138,6 +146,11 @@ modules:
           - ln -sfn /app/ghostship/assets "$SHIP_HOME/assets"
           - ln -sfn /app/ghostship/ghostship.o2r "$SHIP_HOME/ghostship.o2r"
           - ln -sfn /app/ghostship/gamecontrollerdb.txt "$SHIP_HOME/gamecontrollerdb.txt"
+          # Mod scripting: .tcc must be writable (the engine drops a libc.so symlink into .tcc/lib),
+          # so build a real directory and link the read-only pieces into it.
+          - mkdir -p "$SHIP_HOME/.tcc/lib"
+          - ln -sfn /app/ghostship/.tcc/include "$SHIP_HOME/.tcc/include"
+          - for f in /app/ghostship/.tcc/lib/*; do ln -sf "$f" "$SHIP_HOME/.tcc/lib/"; done
           - exec /app/ghostship/Ghostship "$@"
       - type: file
         path: io.github.HarbourMasters.Ghostship.desktop
