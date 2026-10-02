@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Starship
-Comment=Star Fox 64 PC port
-Exec=starship.sh
-Icon=io.github.HarbourMasters.Starship
-Categories=Game;
