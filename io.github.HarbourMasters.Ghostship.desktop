@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Ghostship
+Comment=Super Mario 64 PC port
+Exec=ghostship.sh
+Icon=io.github.HarbourMasters.Ghostship
+Categories=Game;

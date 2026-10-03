@@ -1,0 +1,57 @@
+name: CI
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+      - '*.*.*'
+jobs:
+  build:
+    name: "Build Flatpak"
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Ghostship.flatpak
+          manifest-path: io.github.HarbourMasters.Ghostship.yml
+      - name: Upload temporary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: Ghostship.flatpak
+  release:
+    name: "Publish Release"
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak-bundle
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Ghostship.flatpak
+          generate_release_notes: true
+          body: |
+            Unofficial Flatpak bundle for Ghostship (Super Mario 64 PC port).
+            You must supply your own Super Mario 64 (US) ROM.
+
+            **First install:**
+            ```bash
+            flatpak install --user Ghostship.flatpak
+            flatpak run io.github.HarbourMasters.Ghostship
+            ```
+
+            **Already installed? Update to this version:**
+            ```bash
+            flatpak install --user --reinstall Ghostship.flatpak
+            ```
